@@ -1,0 +1,42 @@
+//Modified indexing policy
+{
+  "indexingMode": "consistent",
+  //only include certain paths
+  "includedPaths": [
+    {
+      "path": "/username/?",
+      "indexes": [
+        {
+          "kind": "Range",
+          "dataType": "Number"
+        }
+      ]
+    },
+    {
+      "path": "/productName/?",
+      "indexes": [
+        {
+          "kind": "Range",
+          "dataType": "Number"
+        }
+      ]
+
+    },
+    {
+      "path": "/verifiedPurchase/?",
+      "indexes": [
+        {
+          "kind": "Range",
+          "dataType": "Number"
+        }
+      ]
+
+    }
+  ],
+  //exclude everything else
+  "excludedPaths": [
+    {
+      "path": "/*"
+    }
+  ]
+}
