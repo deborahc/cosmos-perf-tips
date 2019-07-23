@@ -1,42 +1,26 @@
-//Modified indexing policy
 {
   "indexingMode": "consistent",
-  //only include certain paths
+  "automatic": true,
   "includedPaths": [
     {
       "path": "/username/?",
-      "indexes": [
-        {
-          "kind": "Range",
-          "dataType": "Number"
-        }
-      ]
+      "indexes": []
     },
     {
       "path": "/productName/?",
-      "indexes": [
-        {
-          "kind": "Range",
-          "dataType": "Number"
-        }
-      ]
-
+      "indexes": []
     },
     {
       "path": "/verifiedPurchase/?",
-      "indexes": [
-        {
-          "kind": "Range",
-          "dataType": "Number"
-        }
-      ]
-
+      "indexes": []
     }
   ],
-  //exclude everything else
   "excludedPaths": [
     {
       "path": "/*"
+    },
+    {
+      "path": "/\"_etag\"/?"
     }
   ]
 }
