@@ -4,6 +4,8 @@ using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
 using System.Threading.Tasks;
 
 namespace CosmosOptimization
@@ -24,7 +26,7 @@ namespace CosmosOptimization
         private string databaseId = "DemoDB";
         private string containerId = "UserReviews_v1"; //database partitioned by id
 
-       // <Main>
+        // <Main>
         public static async Task Main(string[] args)
         {
             try
@@ -78,7 +80,10 @@ namespace CosmosOptimization
                         await Issue5_TuneCrossPartitionQuery();
                         break;
                     case ConsoleKey.D6:
-                        await Issue6_TuneIndexingPolicy();
+                        await Issue6_UsingStreamAPI();
+                        break;
+                    case ConsoleKey.D7:
+                        await Issue7_TuneIndexingPolicy();
                         break;
                     default:
                         Console.WriteLine("Select choice");
@@ -103,7 +108,9 @@ namespace CosmosOptimization
             Console.WriteLine("4 - Issue 4: Tuning MaxItemCount per page"); //TODO Move this out
 
             Console.WriteLine("5 - Issue 5: Tuning cross-partition query"); //TODO Move this out
-            Console.WriteLine("6 - Issue 6: Tuning indexing policy"); //TODO Move this out
+            Console.WriteLine("6 - Issue 6: Query using Streams API for Web API scenarios"); //TODO Move this out
+
+            Console.WriteLine("7 - Issue 7: Tuning indexing policy"); //TODO Move this out
 
             Console.WriteLine("--------------------------------------------------------------------- ");
         }
@@ -113,8 +120,8 @@ namespace CosmosOptimization
         {
             var cosmosClientOptions = new CosmosClientOptions()
             {
-                ApplicationRegion = "West US 2",
-                //ApplicationRegion = "East US 2",
+                //ApplicationRegion = "West US 2",
+                ApplicationRegion = "East US 2",
 
             };
             // Create a new instance of the Cosmos Client
@@ -153,7 +160,8 @@ namespace CosmosOptimization
         }
 
         // Issue #3: Using queries instead of point reads
-        private async Task Issue3_QueryVsPointRead() { 
+        private async Task Issue3_QueryVsPointRead()
+        {
 
             var username = "Curt28";
             var id = "Curt28";
@@ -170,28 +178,43 @@ namespace CosmosOptimization
         }
 
         // Issue #4: Tuning Max Item Count on queries
-        private async Task Issue4_TuneMaxItemCount() {
+        private async Task Issue4_TuneMaxItemCount()
+        {
             var username = "Curt28";
             var containerName = "UserReviews_v2";
             var sqlQueryText = "SELECT * FROM c WHERE c.username = '" + username + "'";
-            await RunQuery(sqlQueryText, containerName, maxItemCountPerPage : 50, useQueryOptions:true); //default of 100 maxitemcount per page
-            await RunQuery(sqlQueryText, containerName, maxItemCountPerPage : -1, useQueryOptions: true); // set to dynamic page size
+            await RunQuery(sqlQueryText, containerName, maxItemCountPerPage: 50, useQueryOptions: true); //default of 100 maxitemcount per page
+            await RunQuery(sqlQueryText, containerName, maxItemCountPerPage: -1, useQueryOptions: true); // set to dynamic page size
 
         }
 
-        // For cross partition query, tune max degree of parallelism
-        private async Task Issue5_TuneCrossPartitionQuery() {
+        // Issue #5: For cross partition query, tune max degree of parallelism (max concurrency - the number of partitions that the client will query in parallel)
+        private async Task Issue5_TuneCrossPartitionQuery()
+        {
             var containerName = "UserReviews_v2";
             var sqlQueryText = "SELECT * FROM c WHERE c.rating >= 4.7";
-            await RunQuery(sqlQueryText, containerName, maxItemCountPerPage: -1, maxConcurrency : -1, useQueryOptions: true); // Setting to -1 lets Cosmos DB SDK set it to # of partitions
+            await RunQuery(sqlQueryText, containerName, maxItemCountPerPage: -1, maxConcurrency: -1, useQueryOptions: true); // Setting to -1 lets Cosmos DB SDK set it to # of partitions, for maximum parallelism. This is the default for V3 sdk. 
 
-            await RunQuery(sqlQueryText, containerName, maxItemCountPerPage: -1, maxConcurrency : 0, useQueryOptions: true); // By default, Cosmos sets maxConcurrency = 0 
+            await RunQuery(sqlQueryText, containerName, maxItemCountPerPage: -1, maxConcurrency: 0, useQueryOptions: true); // Set maxConcurrency = 0. 
+        }
+
+        // Issue #6: Using the new stream api
+        public async Task Issue6_UsingStreamAPI()
+        {
+            var containerName = "UserReviews_v2";
+            var sqlQueryText = "SELECT * FROM c WHERE c.rating >= 4.7";
+
+            // Run query without stream and fetch 1 page of results
+            await RunQuerySinglePageWithoutStream(sqlQueryText, containerName);
+
+            // Run query with stream API and fetch 1 page of results
+            await RunQueryUsingStreamAPI(sqlQueryText, containerName);
+
         }
 
 
-
-        // Issue #5: Higher RU than expected on writes
-        private async Task Issue6_TuneIndexingPolicy()
+        // Issue #7: Higher RU than expected on writes
+        private async Task Issue7_TuneIndexingPolicy()
         {
             var database = this.cosmosClient.GetDatabase("IndexingDemo");
             var productReview = GenerateProductReviewDetailed();
@@ -199,7 +222,7 @@ namespace CosmosOptimization
             //Write data to container with default indexing policy
             var container1 = database.GetContainer("DefaultIndexPolicy");
             Console.BackgroundColor = ConsoleColor.Yellow;
-            Console.ForegroundColor = ConsoleColor.Blue ;
+            Console.ForegroundColor = ConsoleColor.Blue;
             Console.WriteLine("Write item to container {0} with default indexing policy", container1.Id);
 
             Console.ResetColor();
@@ -207,7 +230,8 @@ namespace CosmosOptimization
             ItemResponse<ProductReviewDetailed> prItemResponse = await container1.CreateItemAsync<ProductReviewDetailed>(productReview, new PartitionKey(productReview.username));
             Console.WriteLine("\tConsumed {0} RUs", prItemResponse.RequestCharge);
             Console.WriteLine("\n");
-
+            Stopwatch stopWatch = new Stopwatch();
+            stopWatch.Start();
             //Write data to container with tuned indexing policy
             var container2 = database.GetContainer("TunedIndexPolicy");
             Console.BackgroundColor = ConsoleColor.DarkGreen;
@@ -219,10 +243,23 @@ namespace CosmosOptimization
 
             Console.WriteLine("\tConsumed {0} RUs", prItemResponse2.RequestCharge);
             Console.WriteLine("\n\n\n");
+
+            stopWatch.Stop();
+            TimeSpan ts = stopWatch.Elapsed;
+
+            //Print results
+            string elapsedTime = String.Format("{0:00}:{1:00}:{2:00}.{3:00}",
+                ts.Hours, ts.Minutes, ts.Seconds,
+                ts.Milliseconds / 10);
+            Console.ForegroundColor = ConsoleColor.Green;
+
+            Console.WriteLine("\tPoint read returned {0} results", "1");
+            Console.WriteLine("\tTotal time: {0}", elapsedTime);
         }
 
+
         private ProductReviewDetailed GenerateProductReviewDetailed()
-    {
+        {
             //Against 1 collection with indexing policy
             var productReviewDetailed = new Faker<ProductReviewDetailed>()
             .StrictMode(true)
@@ -269,26 +306,30 @@ namespace CosmosOptimization
             double totalRequestCharge = 0;
             QueryDefinition queryDefinition = new QueryDefinition(sqlQueryText);
 
-            // Time the query
-            Stopwatch stopWatch = new Stopwatch();
-            stopWatch.Start();
+
 
             // Run query against Cosmos DB
             var container = this.database.GetContainer(containerName);
 
             QueryRequestOptions requestOptions;
-            if (useQueryOptions) {
+            if (useQueryOptions)
+            {
                 requestOptions = new QueryRequestOptions()
                 {
                     MaxItemCount = maxItemCountPerPage,
                     MaxConcurrency = maxConcurrency,
                 };
-            } else
+            }
+            else
             {
                 requestOptions = new QueryRequestOptions(); //use all default query options
             }
 
-            FeedIterator<dynamic> queryResultSetIterator = container.GetItemQueryIterator<dynamic>(queryDefinition,requestOptions: requestOptions);
+            // Time the query
+            Stopwatch stopWatch = new Stopwatch();
+            stopWatch.Start();
+
+            FeedIterator<dynamic> queryResultSetIterator = container.GetItemQueryIterator<dynamic>(queryDefinition, requestOptions: requestOptions);
             List<dynamic> reviews = new List<dynamic>();
 
             while (queryResultSetIterator.HasMoreResults)
@@ -325,6 +366,117 @@ namespace CosmosOptimization
 
         }
 
+
+        // Helper method to get single page of query results as a stream
+
+        private async Task RunQueryUsingStreamAPI(string sqlQueryText, string containerName, string continuationToken = null)
+        {
+            Console.BackgroundColor = ConsoleColor.Blue;
+
+            Console.WriteLine("Running query with stream API: {0} against container {1}\n", sqlQueryText, containerName);
+
+            Console.ResetColor();
+
+
+            var result = new HttpResponseMessage();
+
+            // Read a single query page from Azure Cosmos DB as stream
+            QueryDefinition query = new QueryDefinition(sqlQueryText);
+
+            var container = this.database.GetContainer(containerName);
+            var queryIterator = container.GetItemQueryStreamIterator(query, continuationToken);
+
+            Stopwatch stopWatch = new Stopwatch();
+            stopWatch.Start();
+
+            // Get 1 page of results with the stream API
+            var queryResponse = await queryIterator.ReadNextAsync();
+
+            // Pass stream directly to response object, without deserializing
+            result.StatusCode = queryResponse.StatusCode;
+            result.Content = new StreamContent(queryResponse.Content);
+            result.Headers.Add("continuationToken", queryResponse.Headers.ContinuationToken);
+
+            stopWatch.Stop();
+            TimeSpan ts = stopWatch.Elapsed;
+
+            //Print results
+            string elapsedTime = String.Format("{0:00}:{1:00}:{2:00}.{3:00}",
+                ts.Hours, ts.Minutes, ts.Seconds,
+                ts.Milliseconds / 10);
+
+            Console.ForegroundColor = ConsoleColor.Green;
+
+            //Print out an except from the string returned
+            using (StreamReader sr = new StreamReader(queryResponse.Content))
+            {
+                var stringResponse =  await sr.ReadToEndAsync();
+
+                Console.WriteLine("\tReturned single page of query results as stream: "); //truncate to show 1st page of results
+                Console.ForegroundColor = ConsoleColor.White;
+
+                Console.WriteLine("\t{0}...\n", stringResponse.Substring(0, 750)); //truncate to show 1st page of results
+
+
+            }
+            Console.ForegroundColor = ConsoleColor.Green;
+
+            Console.WriteLine("\tTotal time: {0}", elapsedTime);
+            Console.WriteLine("\tTotal Request Units consumed: {0}\n", queryResponse.Headers.RequestCharge);
+            Console.WriteLine("\n\n\n");
+            Console.ResetColor();
+
+        }
+
+        private async Task RunQuerySinglePageWithoutStream(string sqlQueryText, string containerName)
+        {
+            Console.BackgroundColor = ConsoleColor.Blue;
+
+            Console.WriteLine("Running query without stream API: {0} against container {1}\n", sqlQueryText, containerName);
+
+            Console.ResetColor();
+
+            double totalRequestCharge = 0;
+            QueryDefinition queryDefinition = new QueryDefinition(sqlQueryText);
+
+            // Time the query
+            Stopwatch stopWatch = new Stopwatch();
+            stopWatch.Start();
+
+            // Run query against Cosmos DB
+            var container = this.database.GetContainer(containerName);
+            var requestOptions = new QueryRequestOptions();
+
+            FeedIterator<dynamic> queryResultSetIterator = container.GetItemQueryIterator<dynamic>(queryDefinition, requestOptions: requestOptions);
+            List<dynamic> reviews = new List<dynamic>();
+
+            FeedResponse<dynamic> currentResultSet = await queryResultSetIterator.ReadNextAsync();
+            totalRequestCharge += currentResultSet.RequestCharge;
+
+            stopWatch.Stop();
+
+            //Console.WriteLine("another page");
+            foreach (var item in currentResultSet)
+            {
+                reviews.Add(item);
+            }
+
+            TimeSpan ts = stopWatch.Elapsed;
+
+            //Print results
+            string elapsedTime = String.Format("{0:00}:{1:00}:{2:00}.{3:00}",
+                ts.Hours, ts.Minutes, ts.Seconds,
+                ts.Milliseconds / 10);
+
+            Console.ForegroundColor = ConsoleColor.Green;
+
+            Console.WriteLine("\tQuery returned {0} results", reviews.Count);
+            Console.WriteLine("\tTotal time: {0}", elapsedTime);
+            Console.WriteLine("\tTotal Request Units consumed: {0}\n", totalRequestCharge);
+            Console.WriteLine("\n\n\n");
+            Console.ResetColor();
+        }
+
         //Helper method to run point read
         private async Task RunPointRead(string id, string partitionKeyValue, string containerName)
         {
@@ -356,5 +508,41 @@ namespace CosmosOptimization
             Console.WriteLine("\n\n\n");
             Console.ResetColor();
         }
+
+
     }
+
 }
+
+//    //Streaming example
+
+//    namespace CosmosWebAPI.Controllers
+//    {
+//        [Produces("application/json")]
+//        [Route("api/ProductReview")]
+//        // GET: api/ProductReview/productId/continuationToken
+//        [HttpGet("{productId}/{continuationToken}", Name = "Get")]
+
+//        // using the new stream api
+//        public async Task<HttpResponseMessage> Query(string productId, string continuationToken)
+//        {
+//            var result = new HttpResponseMessage();
+
+//            // Read a single query page from Azure Cosmos DB as stream
+//            QueryDefinition query = new QueryDefinition("SELECT * FROM Reviews r WHERE r.productId = @id")
+//                .WithParameter("@id", productId);
+
+//            var queryIterator = this.container.GetItemQueryStreamIterator(query, continuationToken);
+
+//            var queryResponse = await queryIterator.ReadNextAsync();
+
+//            // Pass stream directly to response object, without deserializing
+//            result.StatusCode = queryResponse.StatusCode;
+//            result.Content = new StreamContent(queryResponse.Content);
+//            result.Headers.Add("continuationToken", queryResponse.Headers.ContinuationToken);
+
+//            return result;
+//        }
+//    }
+//}
+
