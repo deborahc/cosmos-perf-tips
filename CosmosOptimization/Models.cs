@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using System;
 
 namespace CosmosOptimization
 {
@@ -91,6 +92,23 @@ namespace CosmosOptimization
         public string prop11 { get; set; }
 
         public string prop12 { get; set; }
+
+    }
+
+    public class UserTaskItem
+    {
+        public UserTaskItem()
+        {
+        }
+
+        [JsonProperty(PropertyName = "id")]
+        public string Id { get; set; }
+
+        [JsonProperty(PropertyName = "_partitionKey", NullValueHandling = NullValueHandling.Ignore)]
+        public string PartitionKey { get; set; }
+
+        [JsonProperty(PropertyName = "status")]
+        public string Status { get; set; }
 
     }
 }

@@ -85,6 +85,9 @@ namespace CosmosOptimization
                     case ConsoleKey.D7:
                         await Issue7_TuneIndexingPolicy();
                         break;
+                    case ConsoleKey.D8:
+                        await Issue8_ScaleFixedContainer();
+                        break;
                     default:
                         Console.WriteLine("Select choice");
                         break;
@@ -111,6 +114,7 @@ namespace CosmosOptimization
             Console.WriteLine("6 - Issue 6: Query using Streams API for Web API scenarios"); //TODO Move this out
 
             Console.WriteLine("7 - Issue 7: Tuning indexing policy"); //TODO Move this out
+            Console.WriteLine("8 - Issue 8: Scaling fixed containers with partition keys"); //TODO Move this out
 
             Console.WriteLine("--------------------------------------------------------------------- ");
         }
@@ -120,8 +124,8 @@ namespace CosmosOptimization
         {
             var cosmosClientOptions = new CosmosClientOptions()
             {
-                //ApplicationRegion = "West US 2",
-                ApplicationRegion = "East US 2",
+                ApplicationRegion = "West US 2",
+                //ApplicationRegion = "East US 2",
 
             };
             // Create a new instance of the Cosmos Client
@@ -507,6 +511,122 @@ namespace CosmosOptimization
             Console.WriteLine("\tTotal Request Units consumed: {0}\n", userProfileResponse.RequestCharge);
             Console.WriteLine("\n\n\n");
             Console.ResetColor();
+        }
+
+        private async Task Issue8_ScaleFixedContainer()
+        {
+            Console.BackgroundColor = ConsoleColor.Blue;
+
+            Console.Write("Scaling a fixed collection using partition keys...\n");
+            Console.ResetColor();
+
+            // first create the collection
+            var databaseId = "ScaleFixedCollectionDemo";
+            var containerId = "FixedCollection";
+            //Get reference to existing fixed container
+            await CreateNonPartitionedContainerAsync();
+
+            var container = this.cosmosClient.GetDatabase(databaseId).GetContainer(containerId);
+
+            // Delete existing documents if they exist
+
+            try
+            {
+                await container.DeleteItemAsync<UserTaskItem>(id: "bob", partitionKey: PartitionKey.None);
+                await container.DeleteItemAsync<UserTaskItem>(id: "alice", partitionKey: new PartitionKey("alice"));
+            } catch
+            {
+
+            }
+
+            // Add item to container without partition key
+            var userTask = new UserTaskItem()
+            {
+                Id = "bob",
+                Status = "Learning Azure Cosmos DB!"
+            };
+
+
+            var bobTask = await container.CreateItemAsync<UserTaskItem>(userTask, PartitionKey.None); Console.ForegroundColor = ConsoleColor.Green;
+            Console.ForegroundColor = ConsoleColor.Green;
+
+            Console.WriteLine("Created item with id: {0} and partitionKey: {1}", bobTask.Resource.Id, bobTask.Resource.PartitionKey);
+
+            // Now start taking advantage of partitioning! Create a new item with partition key value of user Id
+            var userTaskWithPartitionKey = new UserTaskItem()
+            {
+                Id = "alice",
+                PartitionKey = "alice",
+                Status = "Partitioning all the data"
+            };
+
+            // Add item to container with partition key
+            var aliceTask = await container.CreateItemAsync<UserTaskItem>(userTaskWithPartitionKey, new PartitionKey(userTaskWithPartitionKey.PartitionKey));
+            Console.WriteLine("\tCreated item with id: {0} and partitionKey: {1}", aliceTask.Resource.Id, aliceTask.Resource.PartitionKey);
+            Console.ResetColor();
+            // Scale throughtput beyond  10,000 RU/s limit of fixed containers
+            //var throughputResponse = await container.ReplaceThroughputAsync(15000);
+
+        }
+
+        private async Task CreateNonPartitionedContainerAsync()
+        {
+            //First, create the database
+
+            // Creating non partition Container, REST api used instead of .NET SDK as creation without a partition key is not supported anymore.
+            var PreNonPartitionedMigrationApiVersion = "2018-09-17";
+            var utc_date = DateTime.UtcNow.ToString("r");
+
+            var databaseId = "ScaleFixedCollectionDemo";
+            var containerId = "FixedCollection";
+
+            await this.cosmosClient.CreateDatabaseIfNotExistsAsync(databaseId);
+
+            // Create a fixed container if it doesn't already exist
+
+            var containerResponse = await this.cosmosClient.GetContainer(databaseId, containerId).ReadContainerAsync();
+            if (containerResponse.StatusCode != System.Net.HttpStatusCode.OK)
+            {
+                //Console.WriteLine("Creating container without a partition key");
+                HttpClient client = new System.Net.Http.HttpClient();
+                Uri baseUri = new Uri(EndpointUri);
+                string verb = "POST";
+                string resourceType = "colls";
+                string resourceId = string.Format("dbs/{0}", databaseId);
+                string resourceLink = string.Format("dbs/{0}/colls", databaseId);
+                client.DefaultRequestHeaders.Add("x-ms-date", utc_date);
+                client.DefaultRequestHeaders.Add("x-ms-version", PreNonPartitionedMigrationApiVersion);
+
+                string authHeader = GenerateMasterKeyAuthorizationSignature(verb, resourceId, resourceType, PrimaryKey, "master", "1.0", utc_date);
+
+                client.DefaultRequestHeaders.Add("authorization", authHeader);
+                string containerDefinition = "{\n  \"id\": \"" + containerId + "\"\n}";
+                StringContent containerContent = new StringContent(containerDefinition);
+                Uri requestUri = new Uri(baseUri, resourceLink);
+                var response = await client.PostAsync(requestUri.ToString(), containerContent);
+                Console.WriteLine("Create container response {0}", response.StatusCode);
+            }
+        }
+
+        private static string GenerateMasterKeyAuthorizationSignature(string verb, string resourceId, string resourceType, string key, string keyType, string tokenVersion, string utc_date)
+        {
+            System.Security.Cryptography.HMACSHA256 hmacSha256 = new System.Security.Cryptography.HMACSHA256 { Key = Convert.FromBase64String(key) };
+
+            string payLoad = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}\n{1}\n{2}\n{3}\n{4}\n",
+                    verb.ToLowerInvariant(),
+                    resourceType.ToLowerInvariant(),
+                    resourceId,
+                    utc_date.ToLowerInvariant(),
+                    ""
+            );
+
+            byte[] hashPayLoad = hmacSha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payLoad));
+            string signature = Convert.ToBase64String(hashPayLoad);
+
+            return System.Web.HttpUtility.UrlEncode(string.Format(System.Globalization.CultureInfo.InvariantCulture, "type={0}&ver={1}&sig={2}",
+                keyType,
+                tokenVersion,
+                signature));
         }
 
 
