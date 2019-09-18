@@ -36,7 +36,7 @@ Now, you can select different options for the scenario you'd like to demo. If th
 
 [**Scenario 5**: Tuning Cross-partition queries](#scenario-5-tuning-cross-partition-queries)
 
-[**Scenario 6**: Use the Stream API for Web API scenarios](#scenario-6-use-the-stream-api-for-web-api-scenarios)]
+[**Scenario 6**: Use the Stream API for Web API scenarios](#scenario-6-use-the-stream-api-for-web-api-scenarios)
 
 [**Scenario 7**: Tune the indexing policy - for write-heavy scenarios](#scenario-7-tune-the-indexing-policy---for-write-heavy-scenarios)
 
