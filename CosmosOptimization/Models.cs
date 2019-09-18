@@ -55,6 +55,8 @@ namespace CosmosOptimization
     {
         public string id { get; set; }
 
+        public string partitionKey { get; set; }
+
         public string username { get; set; }
 
         public bool verifiedPurchase { get; set; }
