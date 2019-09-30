@@ -33,7 +33,7 @@ namespace CosmosOptimization
             try
             {
                 Program p = new Program();
-                p.Go().Wait();
+                await p.Go();
             }
             catch (CosmosException ce)
             {
