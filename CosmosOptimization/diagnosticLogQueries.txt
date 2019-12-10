@@ -1,0 +1,45 @@
+//Identify which collections received 429s in last 24 hours, which occur when consumed RU/s exceeds provisioned RU/s.
+//Occasional 429s are fine, as Cosmos client SDKs and data import tools (Azure Data Factory, bulk executor library) automatically retry on 429s. 
+//High number of 429s may indidcate you have a hot partition or need to scale up throughput. Review https://aka.ms/cosmos-partition-key and https://aka.ms/cosmos-estimate-ru
+AzureDiagnostics
+| where TimeGenerated >= ago(24hr)
+| where Category == "DataPlaneRequests"
+| where statusCode_s == 429 
+| summarize numberOfThrottles = count() by Resource, databaseName_s, collectionName_s, requestResourceType_s, bin(TimeGenerated, 1hr)
+| order by numberOfThrottles 
+
+
+//Identify top operations and consumed RUs per operation in last 24 hours
+AzureDiagnostics
+| where TimeGenerated >= ago(24hr)
+| where Category == "DataPlaneRequests"
+| summarize numberOfOperations = count(), totalConsumedRU = sum(todouble(requestCharge_s)) by Resource, databaseName_s, collectionName_s, OperationName, requestResourceType_s, requestResourceId_s
+| extend averageRUPerOperation = totalConsumedRU / numberOfOperations 
+| order by numberOfOperations 
+
+
+//Identify top queries that consumed the most RUs in past 24 hours
+//We join DataPlaneRequests, which gives us RU charge with QueryRuntimeStatistics, which gives the obfuscated query text
+let queryRUChargeData = AzureDiagnostics
+| where Category == "DataPlaneRequests" 
+| where OperationName == "Query" 
+| summarize by requestCharge_s, activityId_g, databaseName_s, collectionName_s, requestResourceType_s, requestResourceId_s, OperationName, TimeGenerated, callerId_s, clientIpAddress_s, userAgent_s;
+AzureDiagnostics
+| where TimeGenerated >= ago(24hr)
+| where Category == "QueryRuntimeStatistics"
+| join queryRUChargeData on $left.activityId_g == $right.activityId_g
+| summarize numberOfTimesRun = count(), totalConsumedRU = sum(todouble(requestCharge_s1)) by databasename_s, collectionname_s, OperationName1, requestResourceType_s1, requestResourceId_s1, querytext_s, callerId_s1, clientIpAddress_s1, userAgent_s1, bin(TimeGenerated1, 1min) //bin by 1 minute
+| extend averageRUPerExecution = totalConsumedRU / numberOfTimesRun
+| order by averageRUPerExecution desc 
+
+
+//Identify top logical partition keys by storage. 
+//PartitionKeyStatistics will emit data for top logical partition keys by storage
+//As a best practice, choose a partition key for your collections that evenly distributes throughput (RU/s) and storage. 
+// Azure Cosmos DB supports 10GB of data for a single logical partition key. Review https://aka.ms/cosmos-partition-key for guidance.
+AzureDiagnostics
+| where Category == "PartitionKeyStatistics"
+//| where Resource == "CosmosAccountName" and collectionName_s == "CollectionToAnalyze" //Replace to target query to specific account and collection
+| summarize arg_max(TimeGenerated, *) by Resource, databaseName_s, collectionName_s, partitionKey_s //Get the latest storage size
+| extend utilizationOf10GBLogicalPartition = sizeKb_d / 10000000 //10GB
+| project TimeGenerated, Resource , databaseName_s , collectionName_s , partitionKey_s, sizeKb_d, utilizationOf10GBLogicalPartition 
