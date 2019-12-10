@@ -151,7 +151,7 @@ Running query: SELECT * FROM c WHERE c.username = 'Curt28' against container Use
 
 **Best practice(s)**: 
 - For read or query heavy scenarios, [choose a partition key](https://docs.microsoft.com/azure/cosmos-db/partitioning-overview#choose-partitionkey) that can be used as the filter in the majority of your queries, or as lookup keys (see [Scenario 3](#scenario-3-using-query-instead-of-point-reads)).
-- Measure the RU charge of your queries on a representative dataset. For smaller workloads (e.g. < 50GB, 50 RU/s), the additional cost incurred by checking multiple partitions will be minimal. 
+- Measure the RU charge of your queries on a representative dataset. For smaller workloads (e.g. < 50GB, 50k RU/s), the additional cost incurred by checking multiple partitions will be minimal. 
 - Cross-partition queries may be ok if they are run infrequently (e.g. few times/hour).
 
 ### **Scenario 3**: Using query instead of point reads
