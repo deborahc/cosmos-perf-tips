@@ -199,7 +199,7 @@ Result count: 881
         Total Request Units consumed: 86.98
 ```
 
-Setting ```MaxItemCount = 1``` gets us all 881 documents in 1 trip, resulting in lower latency and RU charge.
+Setting ```MaxItemCount = -1``` gets us all 881 documents in 1 trip, resulting in lower latency and RU charge.
 
 ```bash
 Running query: SELECT * FROM c WHERE c.username = 'Curt28' against container UserReviews_v2
